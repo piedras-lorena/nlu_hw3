@@ -14,11 +14,12 @@ from sklearn.model_selection import train_test_split
 from transformers import (
     RobertaTokenizerFast,
     TrainingArguments,
-    hyperparameter_search,
     Trainer
     )
 from ray.tune.suggest.bayesopt import BayesOptSearch
+from ray.tune.suggest.basic_variant import BasicVariantGenerator
 from ray import tune
+from ray.tune import CLIReporter
 
 parser = argparse.ArgumentParser(
     description="Run a hyperparameter search for finetuning a RoBERTa model on the BoolQ dataset."
@@ -48,25 +49,23 @@ test_data = boolq.BoolQDataset(test_df, tokenizer)
 ## training and tuning the model. Consult the assignment handout for some
 ## sample hyperparameter values.
 training_args = TrainingArguments(
-    output_dir="/scratch/${USER}/",
+    output_dir="/scratch/lp2535/spring2022/nlu/hw/nlu_hw3/data/checkpoints/",
     do_train=True,
     do_eval=True,
-    per_gpu_train_batch_size=8,
-    per_gpu_eval_batch_size=64,
-    num_train_epochs=3, # due to time/computation constraints
+    per_device_train_batch_size=8,
+    # per_gpu_eval_batch_size=64,
+    num_train_epochs=3,
     logging_steps=500,
     logging_first_step=True,
     save_steps=1000,
     evaluation_strategy = "epoch", # evaluate at the end of every epoch
-    learning_rate=2e-5,
-    weight_decay=0.01,
 )
 trainer = Trainer(
     args=training_args,
     tokenizer=tokenizer,
     train_dataset=train_data,
     eval_dataset=val_data,
-    model_init=finetuning_utils.model_init(),
+    model_init=finetuning_utils.model_init,
     compute_metrics=finetuning_utils.compute_metrics,
 )
 
@@ -75,22 +74,29 @@ trainer = Trainer(
 tune_config = {
     'learning_rate': tune.uniform(1e-5, 5e-5)
 }
-bayes_search = BayesOptSearch()
+# bayes_search = BayesOptSearch(
+#    metric="objective", mode="max"
+#    )
+bayes_search = BasicVariantGenerator()
+reporter = CLIReporter(
+        parameter_columns={
+            "learning_rate": "lr",
+            "num_train_epochs": "num_epochs"
+        },
+        metric_columns=[
+            "eval_accuracy", "eval_f1", "eval_loss"
+        ])
 
-trainer.hyperparameter_search(
+best_model = trainer.hyperparameter_search(
     hp_space=lambda _: tune_config,
     search_alg=bayes_search,
     direction="maximize", 
     backend="ray", 
     n_trials=5,
-    compute_objective=finetuning_utils.compute_metrics
+    compute_objective= lambda metrics : metrics["eval_accuracy"],
+    resources_per_trial={"cpu": 1, "gpu": 1},
+    progress_reporter=reporter,
+    local_dir="/scratch/lp2535/spring2022/nlu/hw/nlu_hw3/data/ray_reports",
+    name="tune_transformer_lore"
 )
-## TODO: Initialize a transformers.Trainer object and run a Bayesian
-## hyperparameter search for at least 5 trials (but not too many) on the 
-## learning rate. Hint: use the model_init() and
-## compute_metrics() methods from finetuning_utils.py as arguments to
-## Trainer(). Use the hp_space parameter in hyperparameter_search() to specify
-## your hyperparameter search space. (Note that this parameter takes a function
-## as its value.)
-## Also print out the run ID, objective value,
-## and hyperparameters of your best run.
+print(best_model)

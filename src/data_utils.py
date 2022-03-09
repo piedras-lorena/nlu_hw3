@@ -26,8 +26,7 @@ def encode_data(dataset, tokenizer, max_seq_length=128):
             list(dataset["passage"].values),
             max_length=max_seq_length,
             padding="max_length",
-            #TODO: make sure this is right
-            truncation=True,
+            truncation='only_second',
             return_offsets_mapping=True,
       )
     input_ids = torch.tensor(tokenized_data['input_ids'])
